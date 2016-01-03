@@ -17,13 +17,13 @@ struct search_parameters {
 	const char *mode;
 	ut64 from;
 	ut64 to;
-	boolt inverse;
-	boolt crypto_search;
-	boolt bckwrds;
-	boolt do_bckwrd_srch;
-	boolt use_mread;
-	boolt aes_search;
-	boolt rsa_search;
+	bool inverse;
+	bool crypto_search;
+	bool bckwrds;
+	bool do_bckwrd_srch;
+	bool use_mread;
+	bool aes_search;
+	bool rsa_search;
 };
 
 struct endlist_pair {
@@ -611,7 +611,7 @@ static ut64 findprevopsz(RCore *core, ut64 addr, ut8 *buf) {
 	return UT64_MAX;
 }
 
-static boolt is_end_gadget(const RAnalOp* aop, const ut8 crop) {
+static bool is_end_gadget(const RAnalOp* aop, const ut8 crop) {
 	switch (aop->type) {
 	case R_ANAL_OP_TYPE_TRAP:
 	case R_ANAL_OP_TYPE_RET:
@@ -647,7 +647,7 @@ static RList* construct_rop_gadget(RCore *core, ut64 addr, ut8 *buf, int idx,
 	RList *hitlist = r_core_asm_hit_list_new ();
 	ut8 nb_instr = 0;
 	const ut8 max_instr = r_config_get_i (core->config, "rop.len");
-	boolt valid = 0;
+	bool valid = false;
 	int grep_find;
 	int search_hit;
 	RRegex* rx = NULL;
@@ -752,7 +752,7 @@ ret:
 	return hitlist;
 }
 
-static void print_rop (RCore *core, RList *hitlist, char mode, int *json_first) {
+static void print_rop (RCore *core, RList *hitlist, char mode, bool *json_first) {
 	const char *otype;
 	RCoreAsmHit *hit = NULL;
 	RListIter *iter;
@@ -766,9 +766,8 @@ static void print_rop (RCore *core, RList *hitlist, char mode, int *json_first) 
 	switch (mode) {
 	case 'j':
 		//Handle comma between gadgets
-		if (*json_first == 0)
-			r_cons_strcat (",");
-		else *json_first = 0;
+		if (!*json_first) r_cons_strcat (",");
+		else *json_first = false;
 
 		r_cons_printf ("{\"opcodes\":[");
 		r_list_foreach (hitlist, iter, hit) {
@@ -907,7 +906,7 @@ static int r_core_search_rop(RCore *core, ut64 from, ut64 to, int opt, const cha
 	RListIter *itermap = NULL;
 	char* tok, *gregexp = NULL;
 	char* grep_arg = NULL;
-	boolt json_first = 1;
+	bool json_first = true;
 	RRegex* rx = NULL;
 	int delta = 0;
 	ut8 *buf;
@@ -1110,7 +1109,6 @@ static int r_core_search_rop(RCore *core, ut64 from, ut64 to, int opt, const cha
 						continue;
 					}
 					if (json) mode = 'j';
-
 					if ((mode == 'l') && subchain) {
 						do {
 							print_rop (core, hitlist, mode, &json_first);
@@ -1120,7 +1118,6 @@ static int r_core_search_rop(RCore *core, ut64 from, ut64 to, int opt, const cha
 						print_rop (core, hitlist, mode, &json_first);
 					}
 				}
-
 				if (increment != 1)
 					i = next;
 			}
