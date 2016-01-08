@@ -4,7 +4,17 @@
 
 R_API int r_core_setup_debugger (RCore *r, const char *debugbackend) {
 	int pid, *p = NULL;
-	ut8 is_gdb = (strcmp (debugbackend, "gdb") == 0);
+        char * dbg_backend=debugbackend;
+        if (dbg_backend==NULL && r->debugbackend==NULL) {
+          eprintf("r_core_setup_debugger: What backend to be set up?");
+          return -1;
+        };
+        if (dbg_backend!=NULL) {
+          r->debugbackend=dbg_backend;
+        } else {
+          dbg_backend=r->debugbackend; // Setup the previous backend;
+        };
+	ut8 is_gdb = (strcmp (dbg_backend, "gdb") == 0);
 	RIODesc * fd = r->file ? r->file->desc : NULL;
 	p = fd ? fd->data : NULL;
 	r_config_set_i (r->config, "cfg.debug", 1);
@@ -16,7 +26,7 @@ R_API int r_core_setup_debugger (RCore *r, const char *debugbackend) {
 	pid = *p; // 1st element in debugger's struct must be int
 	r_config_set (r->config, "io.ff", "true");
 	if (is_gdb) r_core_cmd (r, "dh gdb", 0);
-	else r_core_cmdf (r, "dh %s", debugbackend);
+	else r_core_cmdf (r, "dh %s", dbg_backend);
 	r_core_cmdf (r, "dpa %d", pid);
 	r_core_cmdf (r, "dp=%d", pid);
 	r_core_cmd (r, ".dr*", 0);

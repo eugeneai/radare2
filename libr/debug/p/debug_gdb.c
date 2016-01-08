@@ -23,6 +23,10 @@ static int r_debug_gdb_step(RDebug *dbg) {
 	return true;
 }
 
+static int r_debug_gdb_kill(RDebug *dbg, int pid, int tid, int sig) {
+  return gdbr_restart(desc);
+};
+
 static int r_debug_gdb_reg_read(RDebug *dbg, int type, ut8 *buf, int size) {
 	int copy_size;
 	int buflen = 0;
@@ -608,6 +612,7 @@ struct r_debug_plugin_t r_debug_plugin_gdb = {
 	.reg_read = &r_debug_gdb_reg_read,
 	.reg_write = &r_debug_gdb_reg_write,
 	.reg_profile = (void *)r_debug_gdb_reg_profile,
+        .kill = &r_debug_gdb_kill,
 	//.bp_write = &r_debug_gdb_bp_write,
 	//.bp_read = &r_debug_gdb_bp_read,
 };

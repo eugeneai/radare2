@@ -112,7 +112,7 @@ R_API int r_core_file_reopen(RCore *core, const char *args, int perm, int loadbi
 		// XXX - select the right backend
 		if (core->file && core->file->desc)
 			newpid = core->file->desc->fd;
-		r_core_setup_debugger (core, "native");
+		r_core_setup_debugger (core, (char *) NULL);
 		r_debug_select (core->dbg, newpid, newpid);
 	}
 

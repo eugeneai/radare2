@@ -1236,6 +1236,7 @@ R_API int r_core_init(RCore *core) {
 	core->io->cb_printf = r_cons_printf;
 	core->dbg->cb_printf = r_cons_printf;
 	core->dbg->bp->cb_printf = r_cons_printf;
+        core->debugbackend=NULL;
 	r_debug_io_bind (core->dbg, core->io);
 
 	r_core_config_init (core);

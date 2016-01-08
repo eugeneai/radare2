@@ -63,3 +63,10 @@ int handle_removebp(libgdbr_t* g) {
 	return send_ack (g);
 }
 
+int handle_restart(libgdbr_t* g) {
+	return send_ack (g);
+}
+
+int handle_extended(libgdbr_t* g) {
+	return send_ack (g);
+}

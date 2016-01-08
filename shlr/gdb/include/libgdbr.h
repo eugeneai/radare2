@@ -20,7 +20,7 @@
 #define MSG_NOT_SUPPORTED -1
 #define MSG_ERROR_1 -2
 
-/*! 
+/*!
  * Structure that saves a gdb message
  */
 typedef struct libgdbr_message_t {
@@ -29,7 +29,7 @@ typedef struct libgdbr_message_t {
 	uint8_t chk;	/*! Cheksum of the current message read from the packet */
 } libgdbr_message_t;
 
-/*! 
+/*!
  * Core "object" that saves
  * the instance of the lib
  */
@@ -90,6 +90,11 @@ int gdbr_disconnect(libgdbr_t* g);
 int gdbr_continue(libgdbr_t* g, int thread_id);
 int gdbr_step(libgdbr_t* g, int thread_id);
 int gdbr_read_registers(libgdbr_t* g);
+
+
+// kill/restart remote inferior process
+// Also set extended mode of the remote debugger.
+int gdbr_restart(libgdbr_t* g);
 
 /*!
  * \brief Function writes general purpose registers

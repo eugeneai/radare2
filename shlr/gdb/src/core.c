@@ -431,7 +431,6 @@ int gdbr_read_registers(libgdbr_t* g) {
 	ret = send_command (g, CMD_READREGS);
 	if (ret < 0)
 		return ret;
-
 	if (read_packet (g) > 0) {
 		parse_packet (g, 0);
 		return handle_g (g);
@@ -451,7 +450,7 @@ int gdbr_read_memory(libgdbr_t* g, ut64 address, ut64 len) {
 	if (ret < 0)
 		return ret;
 
-	if (read_packet (g) > 0) { 
+	if (read_packet (g) > 0) {
 		parse_packet (g, 0);
 		return handle_m (g);
 	}
@@ -493,6 +492,25 @@ int gdbr_continue(libgdbr_t* g, int thread_id) {
 	return send_vcont (g, CMD_C_CONT, thread_id);
 }
 
+int gdbr_restart(libgdbr_t* g) {
+	int ret = -1;
+        int rc = -1;
+	if (!g) return -1;
+	ret = send_command (g, CMD_EXTENDED_MODE);
+	if (ret < 0) return ret;
+        if (read_packet (g) > 0) {
+          rc=strncmp(g->read_buff, "+$OK#9a", g->read_len);
+          handle_extended(g);
+          if (rc!=0) return -1;
+        } else return -1;
+	ret = send_command (g, CMD_C_RESTART);
+	if (read_packet (g) > 0) {
+          handle_restart(g);
+          return true;
+	}
+	return -1;
+}
+
 int gdbr_send_command(libgdbr_t* g, char* command) {
 	int ret;
 	char* cmd;
@@ -510,7 +528,7 @@ int gdbr_send_command(libgdbr_t* g, char* command) {
 		return handle_cmd (g);
 	}
 	return -1;
-}	
+}
 
 int gdbr_write_bin_registers(libgdbr_t* g){
 	uint64_t buffer_size;
@@ -612,7 +630,7 @@ int gdbr_write_registers(libgdbr_t* g, char* registers) {
 				}
 
 				memset (value, '0', register_size * 2);
-				name_end++; 
+				name_end++;
 				// be able to take hex with and without 0x
 				if (name_end[1] == 'x' || name_end[1] == 'X') name_end += 2;
 				const int val_len = strlen (name_end); // size of the rest
@@ -668,7 +686,7 @@ int send_vcont(libgdbr_t* g, const char* command, int thread_id) {
 	if (ret < 0) return ret;
 	ret = send_command (g, tmp);
 	if (ret < 0) return ret;
-	if (read_packet (g) > 0) { 
+	if (read_packet (g) > 0) {
 		parse_packet (g, 0);
 		return handle_cont (g);
 	}
@@ -781,4 +799,3 @@ int send_command(libgdbr_t* g, const char* command) {
 	}
 	return -1;
 }
-

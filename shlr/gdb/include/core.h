@@ -29,6 +29,8 @@
 #define CMD_C					"vCont"
 #define CMD_C_CONT		"c"
 #define CMD_C_STEP		"s"
+#define CMD_EXTENDED_MODE       "!"
+#define CMD_C_RESTART           "R"
 
 enum Breakpoint {
 	BREAKPOINT,
