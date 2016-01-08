@@ -1,4 +1,4 @@
-/* radare2 - LGPL - Copyright 2013-2015 - pancake */
+/* radare2 - LGPL - Copyright 2013-2016 - pancake */
 
 #include <r_anal.h>
 #include <r_lib.h>
@@ -18,13 +18,15 @@
 #define MEMBASE64(x) cs_reg_name(*handle, insn->detail->arm64.operands[x].mem.base)
 #define REGBASE(x) insn->detail->arm.operands[x].mem.base
 #define REGBASE64(x) insn->detail->arm64.operands[x].mem.base
-#define MEMINDEX(x) insn->detail->arm.operands[x].mem.index
+#define MEMINDEX(x) cs_reg_name(*handle, insn->detail->arm.operands[x].mem.index)
 #define MEMINDEX64(x) insn->detail->arm64.operands[x].mem.index
 #define MEMDISP(x) insn->detail->arm.operands[x].mem.disp
 #define MEMDISP64(x) insn->detail->arm64.operands[x].mem.disp
 #define ISREG(x) insn->detail->arm.operands[x].type == ARM_OP_REG
 #define ISREG64(x) insn->detail->arm64.operands[x].type == ARM64_OP_REG
-// TODO scale and disp
+#define ISMEM(x) insn->detail->arm.operands[x].type == ARM_OP_MEM
+#define LSHIFT(x) insn->detail->arm.operands[x].mem.lshift
+#define LSHIFT2(x) insn->detail->arm.operands[x].shift.value
 
 /* arm64 */
 
@@ -57,10 +59,10 @@ static const char *arg(RAnal *a, csh *handle, cs_insn *insn, char *buf, int n) {
 	}
 	return buf;
 }
+
 #define ARG(x) arg(a, handle, insn, str[x], x)
-
-
 #define OPCALL(opchar) arm64math(a, op, addr, buf, len, handle, insn, opchar)
+
 static void arm64math(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, csh *handle, cs_insn *insn, const char *opchar) {
 	const char *r0 = REG64(0);
 	const char *r1 = REG64(1);
@@ -450,10 +452,22 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 	case ARM_INS_TST:
 		r_strbuf_appendf (&op->esil, "%s,%s,==", ARG(1), ARG(0));
 		break;
-	case ARM_INS_LDRSB: // TODO: not handled properly
-	case ARM_INS_LDRSH: // TODO: not handled properly
+	case ARM_INS_LDRD:
+	case ARM_INS_LDRB:
+		r_strbuf_appendf (&op->esil, "%s,%d,+,[1],%s,=",
+			MEMBASE(1), MEMDISP(1), REG(0));
+		break;
 	case ARM_INS_LDRHT:
 	case ARM_INS_LDRH:
+	case ARM_INS_LDRT:
+	case ARM_INS_LDRBT:
+	case ARM_INS_LDRSB:
+	case ARM_INS_LDRSBT:
+	case ARM_INS_LDRSH:
+	case ARM_INS_LDRSHT:
+	case ARM_INS_LDREXB:
+	case ARM_INS_LDREXD:
+	case ARM_INS_LDREXH:
 	case ARM_INS_LDR:
 		addr &= ~3LL;
 		if (MEMDISP(1)<0) {
@@ -490,19 +504,24 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 					op->refptr = 4;
 					break;
 				}
-				r_strbuf_appendf (&op->esil, "%d,%s,+,%d,+,[4],%s,=",
-					pcdelta, MEMBASE(1), MEMDISP(1), REG(0));
+				if (ISMEM(1) && LSHIFT2(1)) {
+					r_strbuf_appendf (&op->esil, "%d,%s,+,%d,%s,<<,+,[4],%s,=",
+						pcdelta, MEMBASE(1), LSHIFT2(1), MEMINDEX(1), REG(0));
+				} else {
+					if (ISREG(1)) {
+						r_strbuf_appendf (&op->esil, "%d,%s,+,%s,+,[4],%s,=",
+							pcdelta, MEMBASE(1), MEMINDEX(1), REG(0));
+					} else {
+						r_strbuf_appendf (&op->esil, "%d,%s,+,%d,+,[4],%s,=",
+							pcdelta, MEMBASE(1), MEMDISP(1), REG(0));
+					}
+				}
 			} else {
 				r_strbuf_appendf (&op->esil, "%s,%d,+,[4],%s,=",
 					MEMBASE(1), MEMDISP(1), REG(0));
 			}
 			op->refptr = 4;
 		}
-		break;
-	case ARM_INS_LDRD:
-	case ARM_INS_LDRB:
-		r_strbuf_appendf (&op->esil, "%s,%d,+,[1],%s,=",
-			MEMBASE(1), MEMDISP(1), REG(0));
 		break;
 	case ARM_INS_MSR:
 		msr_flags = insn->detail->arm.operands[0].reg >> 4;

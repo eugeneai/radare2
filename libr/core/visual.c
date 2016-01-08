@@ -1091,7 +1091,7 @@ R_API int r_core_visual_cmd(RCore *core, int ch) {
 				break;
 			}
 			ocolor = r_config_get_i (core->config, "scr.color");
-			r_core_visual_graph (core, NULL, true);
+			r_core_visual_graph (core, NULL, NULL, true);
 			r_config_set_i (core->config, "scr.color", ocolor);
 		}
 		break;
@@ -1418,7 +1418,7 @@ R_API int r_core_visual_cmd(RCore *core, int ch) {
 		break;
 	case 'Y':
 		if (!core->yank_buf) {
-			r_cons_strcat ("Can't paste, clipboard is empty.\n");
+			r_cons_strcat ("Cannot paste, clipboard is empty.\n");
 			r_cons_flush ();
 			r_cons_any_key (NULL);
 			r_cons_clear00 ();

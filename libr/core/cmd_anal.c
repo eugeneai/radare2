@@ -149,7 +149,7 @@ static int var_cmd(RCore *core, const char *str) {
 				RAnalVar *var = r_anal_var_get (core->anal, fcn->addr,
 								(char)type, atoi (str + 2), R_ANAL_VAR_SCOPE_LOCAL);
 				if (!var) {
-					eprintf ("Can not find variable in: '%s'\n", str);
+					eprintf ("Cannot find variable in: '%s'\n", str);
 					res = false;
 					break;
 				}
@@ -918,7 +918,7 @@ static int cmd_anal_fcn(RCore *core, const char *input) {
 						r_cons_printf ("%c 0x%08" PFMT64x " -> 0x%08" PFMT64x "\n",
 							ref->type, ref->at, ref->addr);
 					}
-				} else eprintf ("Cant find function\n");
+				} else eprintf ("Cannot find function\n");
 			}
 #else
 #warning TODO_ FCNOLD sdbize xrefs here
@@ -974,7 +974,7 @@ static int cmd_anal_fcn(RCore *core, const char *input) {
 		}
 		break;
 	case 'g': // "afg" - non-interactive VV
-		r_core_visual_graph (core, NULL, false);
+		r_core_visual_graph (core, NULL, NULL, false);
 		break;
 	case 'F': // "afF"
 	{
@@ -2782,6 +2782,14 @@ static void cmd_agraph_edge(RCore *core, const char *input) {
 }
 
 static void cmd_agraph_print(RCore *core, const char *input) {
+	const char *help_msg[] = {
+		"Usage:", "agg[kid?*]", "print graph",
+		"agg", "", "show current graph in ascii art",
+		"aggk", "", "show graph in key=value form",
+		"aggd", "", "print the current graph in GRAPHVIZ dot format",
+		"aggi", "", "enter interactive mode for the current graph",
+		"agg*", "", "in r2 commands, to save in projects, etc",
+		NULL };
 	switch (*input) {
 	case 'k': // "aggk"
 	{
@@ -2789,6 +2797,18 @@ static void cmd_agraph_print(RCore *core, const char *input) {
 		char *o = sdb_querys (db, "NULL", 0, "*");
 		r_cons_printf ("%s", o);
 		free (o);
+		break;
+	}
+	case 'i': // "aggi" - open current core->graph in interactive mode
+	{
+		RANode *ran = r_agraph_get_first_node (core->graph);
+		r_agraph_set_title (core->graph, r_config_get (core->config, "graph.title"));
+		r_agraph_set_curnode (core->graph, ran);
+		core->graph->force_update_seek = true;
+		core->graph->need_set_layout = true;
+		core->graph->need_update_dim = true;
+		r_core_visual_graph (core, core->graph, NULL, true);
+		r_cons_show_cursor (true);
 		break;
 	}
 	case 'd': // "aggd" - dot format
@@ -2803,11 +2823,14 @@ static void cmd_agraph_print(RCore *core, const char *input) {
 		r_agraph_foreach (core->graph, agraph_print_node, NULL);
 		r_agraph_foreach_edge (core->graph, agraph_print_edge, NULL);
 		break;
+	case '?':
+		r_core_cmd_help (core, help_msg);
+		break;
 	default:
 		core->graph->can->linemode = 1;
 		core->graph->can->color = r_config_get_i (core->config, "scr.color");
 		r_agraph_set_title (core->graph,
-				r_config_get (core->config, "graph.title"));
+			r_config_get (core->config, "graph.title"));
 		r_agraph_print (core->graph);
 		break;
 	}
@@ -2828,10 +2851,9 @@ static void cmd_anal_graph(RCore *core, const char *input) {
 		"agt", " [addr]", "find paths from current offset to given address",
 		"agf", " [addr]", "Show ASCII art graph of given function",
 		"ag-", "", "Reset the current ASCII art graph",
-		"agn", "[?] title body", "Add a node to the current ASCII art graph",
-		"age", "[?] title1 title2", "Add an edge to the current ASCII art graph",
-		"agg[k*]", "", "Print the current graph in ASCII art",
-		"aggd", "", "Print the current graph in GRAPHVIZ dot format",
+		"agn", "[?] title body", "Add a node to the current graph",
+		"age", "[?] title1 title2", "Add an edge to the current graph",
+		"agg", "[kdi*]", "Print graph in ASCII-Art, graphviz, k=v, r2 or visual",
 		"agv", "[acdltfl] [a]", "view function using graphviz",
 		NULL };
 
@@ -2958,7 +2980,7 @@ static void cmd_anal_trace(RCore *core, const char *input) {
 					core->anal->esil->db_trace = sdb_new0 ();
 				}
 			} else {
-				eprintf ("TODO: ate- cant delete specific logs. Use ate-*\n");
+				eprintf ("TODO: ate- cannot delete specific logs. Use ate-*\n");
 			}
 			break;
 		case ' ': {
