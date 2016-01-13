@@ -27,6 +27,49 @@
 #define ISMEM(x) insn->detail->arm.operands[x].type == ARM_OP_MEM
 #define LSHIFT(x) insn->detail->arm.operands[x].mem.lshift
 #define LSHIFT2(x) insn->detail->arm.operands[x].shift.value
+#define OPCOUNT() insn->detail->arm.op_count
+#define ISSHIFTED(x) (insn->detail->arm.operands[x].shift.type != ARM_SFT_INVALID && insn->detail->arm.operands[x].shift.value != 0)
+
+static const ut32 bitmask_by_width[] = {
+	0x1, 0x3, 0x7, 0xf, 0x1f, 0x3f, 0x7f,
+	0xff, 0x1ff, 0x3ff, 0x7ff, 0xfff, 0x1fff,
+	0x3fff, 0x7fff, 0xffff, 0x1ffff, 0x3ffff,
+	0x7ffff, 0xfffff, 0x1fffff, 0x3fffff,
+	0x7fffff, 0xffffff, 0x1ffffff, 0x3ffffff,
+	0x7ffffff, 0xfffffff, 0x1fffffff, 0x3fffffff,
+	0x7fffffff, 0xffffffff
+};
+
+static const char *decode_shift(arm_shifter shift) {
+	static const char *E_OP_SR = ">>";
+	static const char *E_OP_SL = "<<";
+	//static const char *E_OP_RR = ">>>"; // UNUSED
+	static const char *E_OP_VOID = "";
+
+	switch (shift) {
+	case ARM_SFT_ASR:
+	case ARM_SFT_ASR_REG:
+	case ARM_SFT_LSR:
+	case ARM_SFT_LSR_REG:
+		return E_OP_SR;
+
+	case ARM_SFT_LSL:
+	case ARM_SFT_LSL_REG:
+		return E_OP_SL;
+
+	case ARM_SFT_ROR:
+	case ARM_SFT_RRX:
+	case ARM_SFT_ROR_REG:
+	case ARM_SFT_RRX_REG:
+		return E_OP_SR;
+
+	default:
+		break;
+	}
+	return E_OP_VOID;
+}
+
+#define DECODE_SHIFT(x) decode_shift(insn->detail->arm.operands[x].shift.type)
 
 /* arm64 */
 
@@ -34,9 +77,17 @@ static const char *arg(RAnal *a, csh *handle, cs_insn *insn, char *buf, int n) {
 	buf[0] = 0;
 	switch (insn->detail->arm.operands[n].type) {
 	case ARM_OP_REG:
-		sprintf (buf, "%s",
+		if (ISSHIFTED (n)) {
+			sprintf (buf, "%u,%s,%s",
+			LSHIFT2 (n),
+			cs_reg_name (*handle,
+				insn->detail->arm.operands[n].reg),
+			DECODE_SHIFT (n));
+		} else {
+			sprintf (buf, "%s",
 			cs_reg_name (*handle,
 				insn->detail->arm.operands[n].reg));
+		}
 		break;
 	case ARM_OP_IMM:
 		if (a->bits == 64) {
@@ -129,7 +180,17 @@ static int analop64_esil(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int l
 		r_strbuf_setf (&op->esil, "%s,%s,/=", REG64 (1), REG64 (0));
 		break;
 	case ARM64_INS_B:
-		r_strbuf_setf (&op->esil, "%"PFMT64d",pc,=", (ut64)addr + IMM64 (0));
+		switch (insn->detail->arm.cc) {
+		case 0:
+			r_strbuf_setf (&op->esil, "%"PFMT64d",pc,=", (ut64)addr + IMM64 (0));
+			break;
+		case ARM_CC_EQ:
+			r_strbuf_setf (&op->esil, "zf,{,%"PFMT64d",pc,=,}", (ut64)addr + IMM64 (0));
+			break;
+		case ARM_CC_NE:
+			r_strbuf_setf (&op->esil, "zf,!,{,%"PFMT64d",pc,=,}", (ut64)addr + IMM64 (0));
+			break;
+		}
 		break;
 	case ARM64_INS_BL:
 		r_strbuf_setf (&op->esil, "pc,lr,=,%"PFMT64d",pc,=", addr + IMM64 (0));
@@ -154,7 +215,7 @@ static int analop64_esil(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int l
 	case ARM64_INS_CMP: // cmp w8, 0xd
 	case ARM64_INS_CMN: // cmp w8, 0xd
 		// update esil, cpu flags
-		r_strbuf_setf (&op->esil, "%"PFMT64d",%s,==,$z,=",
+		r_strbuf_setf (&op->esil, "%"PFMT64d",%s,==,$z,zf,=",
 			IMM64(1), REG64(0));
 		break;
 	case ARM64_INS_FCSEL:
@@ -291,7 +352,11 @@ static int analop_esil(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len
 		r_strbuf_setf (&op->esil, "%s,TRAP", ARG(0));
 		break;
 	case ARM_INS_EOR:
-		r_strbuf_setf (&op->esil, "%s,%s,^=", ARG(1), ARG(0));
+		if (OPCOUNT() == 2) {
+			r_strbuf_setf (&op->esil, "%s,%s,^=", ARG(1), ARG(0));
+		} else if (OPCOUNT() == 3) {
+			r_strbuf_setf (&op->esil, "%s,%s,^,%s,=", ARG(2), ARG(1), ARG(0));
+		}
 		break;
 	case ARM_INS_ORR:
 		r_strbuf_setf (&op->esil, "%s,%s,|=", ARG(1), ARG(0));
@@ -356,11 +421,19 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 		break;
 	case ARM_INS_LSL:
 		// suffix 'S' forces conditional flag to be updated
-		r_strbuf_appendf (&op->esil, "%s,%s,<<=", ARG(1), ARG(0));
+		if (OPCOUNT() == 2) {
+			r_strbuf_appendf (&op->esil, "%s,%s,<<=", ARG(1), ARG(0));
+		} else if (OPCOUNT() == 3) {
+			r_strbuf_appendf (&op->esil, "%s,%s,<<,%s,=", ARG(2), ARG(1), ARG(0));
+		}
 		break;
 	case ARM_INS_LSR:
 		// suffix 'S' forces conditional flag to be updated
-		r_strbuf_appendf (&op->esil, "%s,%s,>>=", ARG(1), ARG(0));
+		if (OPCOUNT() == 2) {
+			r_strbuf_appendf (&op->esil, "%s,%s,>>=", ARG(1), ARG(0));
+		} else if (OPCOUNT() == 3) {
+			r_strbuf_appendf (&op->esil, "%s,%s,>>,%s,=", ARG(2), ARG(1), ARG(0));
+		}
 		break;
 	case ARM_INS_B:
 		r_strbuf_appendf (&op->esil, "%s,pc,=%s", ARG(0), hascond? ",}":"");
@@ -517,8 +590,18 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 					}
 				}
 			} else {
-				r_strbuf_appendf (&op->esil, "%s,%d,+,[4],%s,=",
-					MEMBASE(1), MEMDISP(1), REG(0));
+				if (ISMEM(1) && LSHIFT(1)) {
+					r_strbuf_appendf (&op->esil, "%s,%d,%s,<<,+,[4],%s,=",
+						MEMBASE(1), LSHIFT(1), MEMINDEX(1), REG(0));
+				} else {
+					if (ISREG(1)) {
+						r_strbuf_appendf (&op->esil, "%s,%s,+,[4],%s,=",
+							MEMBASE(1), MEMINDEX(1), REG(0));
+					} else {
+						r_strbuf_appendf (&op->esil, "%s,%d,+,[4],%s,=",
+							MEMBASE(1), MEMDISP(1), REG(0));
+					}
+				}
 			}
 			op->refptr = 4;
 		}
@@ -539,6 +622,28 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 			r_strbuf_appendf (&op->esil, "0xFF000000,|,");
 		}
 		r_strbuf_appendf (&op->esil, "DUP,!,SWAP,&,%s,SWAP,cpsr,&,|,cpsr,=",REG(1));
+		break;
+	case ARM_INS_UBFX:
+		if (IMM (3)>0 && IMM (3)<=32-IMM (2)) {
+			r_strbuf_appendf (&op->esil, "%d,%s,%d,%d,<<,&,>>,%s,=",IMM (2),REG (1),IMM (2),bitmask_by_width[IMM (3)-1],REG (0));
+		}
+		break;
+	case ARM_INS_UXTB:
+		r_strbuf_appendf (&op->esil, "%s,0xff,&,%s,=",ARG (1),REG (0));
+		break;
+	case ARM_INS_RSB:
+		if (OPCOUNT () == 2) {
+			r_strbuf_appendf (&op->esil, "%s,%s,-=",ARG (0),ARG (1));
+		} else if (OPCOUNT () == 3) {
+			r_strbuf_appendf (&op->esil, "%s,%s,-,%s,=",ARG (1),ARG (2),ARG (0));
+		}
+		break;
+	case ARM_INS_BIC:
+		if (OPCOUNT () == 2) {
+			r_strbuf_appendf (&op->esil, "%s,0xffffffff,^,%s,&=",ARG (1),ARG (0));
+		} else {
+			r_strbuf_appendf (&op->esil, "%s,0xffffffff,^,%s,&,%s,=",ARG (2),ARG (1),ARG (0));
+		}
 		break;
 	default:
 		break;
@@ -1005,7 +1110,7 @@ static int set_reg_profile(RAnal *anal) {
 		"gpr	sp	.64	248	0\n"
 		"gpr	zr	.64	248	0\n" // zr = sp (x31)
 		"gpr	pc	.64	256	0\n"
-		"gpr	cpsr	.64	264	0\n"
+		"gpr	cpsr	.64	264	0	_____tfiae_____________j__qvczn\n"
 		"gpr	pstate	.64	264	0\n" // x0
 		// probably wrong
 		"gpr	nf	.1	.264	0	sign\n" // msb bit of last op
@@ -1022,6 +1127,7 @@ static int set_reg_profile(RAnal *anal) {
 		"=A1	r1\n"
 		"=A2	r2\n"
 		"=A3	r3\n"
+		"gpr	sb	.32	36	0\n" // r9
 		"gpr	sl	.32	40	0\n" // rl0
 		"gpr	fp	.32	44	0\n" // r11
 		"gpr	ip	.32	48	0\n" // r12
@@ -1047,7 +1153,21 @@ static int set_reg_profile(RAnal *anal) {
 		"gpr	r15	.32	60	0\n"
 		"gpr	r16	.32	64	0\n"
 		"gpr	r17	.32	68	0\n"
-		"gpr	cpsr	.32	72	0\n";
+		"gpr	cpsr	.32	72	0\n"
+		"gpr	tf	.1	72.5	0	thumb\n" // +5
+		"gpr	ef	.1	72.9	0	endian\n" // +9
+		// ...
+		"gpr	jf	.1	72.24	0	java\n" // +24
+		// ...
+		"gpr	qf	.1	72.27	0	sticky_overflow\n" // +27
+		"gpr	vf	.1	72.28	0	overflow\n" // +28
+		"gpr	cf	.1	72.29	0	carry\n" // +29
+		"gpr	zf	.1	72.30	0	zero\n" // +30
+		"gpr	nf	.1	72.31	0	negative\n" // +31
+		// if-then-counter
+		"gpr	itc	.4	72.10	0	if_then_count\n" // +10
+		"gpr	gef	.4	72.16	0	great_or_equal\n" // +16
+		;
 	}
 
 	return r_reg_set_profile_string (anal->reg, p);

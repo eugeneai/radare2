@@ -1017,10 +1017,10 @@ R_API void r_core_visual_config(RCore *core) {
 		}
 
 		if (fs && !strncmp (fs, "asm.", 4))
-			r_core_cmd (core, "pd 5", 0);
+			r_core_cmd (core, "pd $r", 0);
 		r_cons_visual_flush ();
 		ch = r_cons_readchar ();
-		if (ch==4||ch==-1)
+		if (ch==4 || ch==-1)
 			return;
 		ch = r_cons_arrow_to_hjkl (ch); // get ESC+char, return 'hjkl' char
 
@@ -1472,11 +1472,9 @@ static ut64 var_functions_show(RCore *core, int idx, int show) {
 	r_list_foreach (core->anal->fcns, iter, fcn) {
 		if (i>=wdelta) {
 			if (i> window+wdelta) {
-				r_cons_printf("...\n");
+				r_cons_printf ("...\n");
 				break;
-			}
-			//if (seek >= fcn->addr && seek <= fcn->addr+fcn->size)
-			if (idx == i)
+			} else if (idx == i)
 				addr = fcn->addr;
 			if (show)
 				r_cons_printf ("%c%c 0x%08llx (%s)\n",
@@ -1486,6 +1484,50 @@ static ut64 var_functions_show(RCore *core, int idx, int show) {
 		}
 		i++;
 	}
+	return addr;
+}
+
+// In visual mode, display the variables.
+static ut64 var_variables_show(RCore* core, RAnalFunction* fcn, int idx, int show) {
+	int i = 0;
+	ut64 addr = core->offset;
+	int window;
+	int wdelta = (idx > 5) ? idx - 5 : 0;
+	RListIter *iter;
+	// arguments.
+	RList* list2 = r_anal_var_list (core->anal, fcn, 'v');
+	// variables.
+	RList* list = r_anal_var_list (core->anal, fcn, 'a');
+	r_list_join (list, list2);
+	RAnalVar* var;
+	// Adjust the window size automatically.
+	(void)r_cons_get_size (&window);
+	window -= 8;  // Size of printed things.
+
+	// A new line so this looks reasonable.
+	r_cons_printf ("\n");
+
+	r_list_foreach (list, iter, var) {
+		if (i >= wdelta) {
+			if (i > window + wdelta) {
+				r_cons_printf ("...\n");
+				break;
+			} else if (idx == 1) {
+				addr = fcn->addr;
+			}
+			if (show) {
+				r_cons_printf ("%s %s %s @ %s%s0x%x\n",
+						var->kind=='v'?"var":"arg",
+						var->type, var->name,
+						core->anal->reg->name[R_REG_NAME_BP],
+						(var->kind=='v')?"-":"+",
+						var->delta);
+			}
+		}
+		++i;
+	}
+	r_list_free (list);
+	r_list_free (list2);
 	return addr;
 }
 
@@ -1552,7 +1594,8 @@ static ut64 r_core_visual_anal_refresh (RCore *core) {
 			"(a) add     (x)xrefs  \n"
 			"(m) modify  (g)go     \n"
 			"(d) delete  (q)quit   \n", addr);
-		var_index_show (core->anal, fcn, addr, option);
+		addr = var_variables_show (core, fcn, option, 1);
+		// var_index_show (core->anal, fcn, addr, option);
 		break;
 	case 2:
 		r_cons_printf ("Press 'q' to quit call refs\n");
