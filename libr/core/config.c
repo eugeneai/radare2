@@ -722,13 +722,13 @@ static int cb_esildebug (void *user, void *data) {
 
 static int cb_fixrows(void *user, void *data) {
 	RConfigNode *node = (RConfigNode *) data;
-	r_cons_singleton ()->fix_rows = node->i_value;
+	r_cons_singleton ()->fix_rows = (int)node->i_value;
 	return true;
 }
 
 static int cb_fixcolumns(void *user, void *data) {
 	RConfigNode *node = (RConfigNode *) data;
-	r_cons_singleton ()->fix_columns = node->i_value;
+	r_cons_singleton ()->fix_columns = atoi (node->value);
 	return true;
 }
 
@@ -1442,6 +1442,7 @@ R_API int r_core_config_init(RCore *core) {
 	SETPREF("asm.esil", "false", "Show ESIL instead of mnemonic");
 	SETPREF("asm.nodup", "false", "Do not show dupped instructions (collapse disasm)");
 	SETPREF("asm.emu", "false", "Run ESIL emulation analysis on disasm");
+	SETPREF("asm.emustr", "false", "Show only strings if any in the asm.emu output");
 	SETPREF("asm.emuwrite", "false", "Allow asm.emu to modify memory (WARNING)");
 	SETPREF("asm.filter", "true", "Replace numeric values by flags (e.g. 0x4003e0 -> sym.imp.printf)");
 	SETPREF("asm.fcnlines", "true", "Show function boundary lines");

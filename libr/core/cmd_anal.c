@@ -1680,6 +1680,208 @@ static void cmd_esil_mem(RCore *core, const char *input) {
 	r_core_seek (core, curoff, 0);
 }
 
+static ut64 opc = UT64_MAX;
+static ut8 *regstate = NULL;
+
+static void esil_init (RCore *core) {
+	const char *pc = r_reg_get_name (core->anal->reg, R_REG_NAME_PC);
+	opc = r_reg_getv (core->anal->reg, pc);
+	if (!opc || opc==UT64_MAX) opc = core->offset;
+	if (!core->anal->esil) {
+		int iotrap = r_config_get_i (core->config, "esil.iotrap");
+		core->anal->esil = r_anal_esil_new (iotrap);
+		r_anal_esil_setup (core->anal->esil, core->anal, 0, 0);
+	}
+	free (regstate);
+	regstate = r_reg_arena_peek (core->anal->reg);
+}
+
+static void esil_fini(RCore *core) {
+	const char *pc = r_reg_get_name (core->anal->reg, R_REG_NAME_PC);
+	r_reg_arena_poke (core->anal->reg, regstate);
+	r_reg_setv (core->anal->reg, pc, opc);
+	R_FREE (regstate);
+}
+
+typedef struct {
+	RList *regs;
+	RList *regread;
+	RList *regwrite;
+} AeaStats;
+
+static void aea_stats_init (AeaStats *stats) {
+	stats->regs = r_list_newf (free);
+	stats->regread = r_list_newf (free);
+	stats->regwrite = r_list_newf (free);
+}
+
+static void aea_stats_fini (AeaStats *stats) {
+	R_FREE (stats->regs);
+	R_FREE (stats->regread);
+	R_FREE (stats->regwrite);
+}
+
+static bool contains(RList *list, const char *name) {
+	RListIter *iter;
+	const char *n;
+	r_list_foreach (list, iter, n) {
+		if (!strcmp (name, n))
+			return true;
+	}
+	return false;
+}
+
+static char *oldregread = NULL;
+
+static int myregwrite(RAnalEsil *esil, const char *name, ut64 val) {
+	AeaStats *stats = esil->user;
+	if (oldregread && !strcmp (name, oldregread)) {
+		r_list_pop (stats->regread);
+		R_FREE (oldregread)
+	}
+	if (!IS_NUMBER (*name)) {
+		if (!contains (stats->regs, name)) {
+			r_list_push (stats->regs, strdup (name));
+		}
+		if (!contains (stats->regwrite, name)) {
+			r_list_push (stats->regwrite, strdup (name));
+		}
+	}
+	return 0;
+}
+
+static int myregread(RAnalEsil *esil, const char *name, ut64 *val, int *len) {
+	AeaStats *stats = esil->user;
+	if (!IS_NUMBER (*name)) {
+		if (!contains (stats->regs, name)) {
+			r_list_push (stats->regs, strdup (name));
+		}
+		if (!contains (stats->regread, name)) {
+			r_list_push (stats->regread, strdup (name));
+		}
+	}
+	return 0;
+}
+
+static void showregs (RList *list) {
+	if (!r_list_empty (list)) {
+		char *reg;
+		RListIter *iter;
+		r_list_foreach (list, iter, reg) {
+			r_cons_printf ("%s", reg);
+			if (iter->n) r_cons_printf (" ");
+		}
+		r_cons_newline();
+	}
+}
+static bool cmd_aea(RCore* core, int mode, ut64 addr, int length) {
+	RAnalEsil *esil;
+	int ptr, ops, ops_end, len, buf_sz, maxopsize;
+	ut64 addr_end;
+	AeaStats stats;
+	const char *esilstr;
+	RAnalOp aop = {0};
+	ut8 *buf;
+	if (!core)
+		return false;
+	maxopsize = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_MAX_OP_SIZE);
+	if (maxopsize < 1) maxopsize = 16;
+	if (mode & 1) {
+		// number of bytes / length
+		buf_sz = length;
+	} else {
+		// number of instructions / opcodes
+		ops_end = length;
+		if (ops_end < 1) ops_end = 1;
+		buf_sz = ops_end * maxopsize;
+	}
+	if (buf_sz < 1) {
+		buf_sz = maxopsize;
+	}
+	addr_end = addr + buf_sz;
+	buf = malloc (buf_sz);
+	if (!buf) {
+		return false;
+	}
+	(void)r_io_read_at (core->io, addr, (ut8 *)buf, buf_sz);
+	aea_stats_init (&stats);
+
+	esil_init (core);
+	esil = core->anal->esil;
+#	define hasNext(x) (x&1) ? (addr<addr_end) : (ops<ops_end)
+	esil->user = &stats;
+	esil->cb.hook_reg_write = myregwrite;
+	esil->cb.hook_reg_read = myregread;
+	esil->nowrite = true;
+	for (ops = ptr = 0; ptr < buf_sz && hasNext (mode); ops++, ptr += len) {
+		len = r_anal_op (core->anal, &aop, addr + ptr, buf + ptr, buf_sz - ptr);
+		esilstr = R_STRBUF_SAFEGET (&aop.esil);
+		if (len < 1) {
+			eprintf ("Invalid 0x%08"PFMT64x" instruction %02x %02x\n",
+				addr + ptr, buf[ptr], buf[ptr + 1]);
+			break;
+		}
+		r_anal_esil_parse (esil, esilstr);
+		r_anal_esil_stack_free (esil);
+	}
+	esil->nowrite = false;
+	esil->cb.hook_reg_write = NULL;
+	esil->cb.hook_reg_read = NULL;
+	esil_fini (core);
+
+	/* show registers used */
+	if ((mode >> 1) & 1) {
+		showregs (stats.regread);
+	} else if ((mode >> 2) & 1) {
+		showregs (stats.regwrite);
+	} else if ((mode >> 3) & 1) {
+		RListIter *iter;
+		char *reg;
+		r_list_foreach (stats.regs, iter, reg) {
+			if (!contains (stats.regwrite, reg)) {
+				r_cons_printf ("%s", reg);
+				if (iter->n) r_cons_printf (" ");
+			}
+		}
+		r_cons_newline();
+	} else {
+		r_cons_printf ("A: ");
+		showregs (stats.regs);
+		r_cons_printf ("R: ");
+		showregs (stats.regread);
+		r_cons_printf ("W: ");
+		showregs (stats.regwrite);
+		r_cons_printf ("N: ");
+		{
+			RListIter *iter;
+			char *reg;
+			r_list_foreach (stats.regs, iter, reg) {
+				if (!contains (stats.regwrite, reg)) {
+					r_cons_printf ("%s", reg);
+					if (iter->n) r_cons_printf (" ");
+				}
+			}
+			r_cons_newline();
+		}
+	}
+	aea_stats_fini (&stats);
+	free (buf);
+	return true;
+}
+
+static void aea_help(RCore *core) {
+	const char *help_msg[] = {
+		"Examples:", "aea", " show regs used in a range",
+		"aea", " [ops]", "Show regs used in N instructions",
+		"aeaf", "", "Show regs used in current function",
+		"aear", " [ops]", "Show regs read in N instructions",
+		"aeaw", " [ops]", "Show regs written in N instructions",
+		"aean", " [ops]", "Show regs not written in N instructions",
+		"aeA", " [len]", "Show regs used in N bytes (subcommands are the same)",
+		NULL };
+	r_core_cmd_help (core, help_msg);
+}
+
 static void cmd_anal_esil(RCore *core, const char *input) {
 	const char *help_msg[] = {
 		"Usage:", "aep[-c] ", " [...]",
@@ -1962,6 +2164,38 @@ static void cmd_anal_esil(RCore *core, const char *input) {
 			break;
 		}
 		break;
+	case 'A': // "aeA"
+		if (input[1] == '?') {
+			aea_help (core);
+		} else if (input[1] == 'r') {
+			cmd_aea (core, 1 + (1<<1), core->offset, r_num_math (core->num, input+2));
+		} else if (input[1] == 'w') {
+			cmd_aea (core, 1 + (1<<2), core->offset, r_num_math (core->num, input+2));
+		} else if (input[1] == 'n') {
+			cmd_aea (core, 1 + (1<<3), core->offset, r_num_math (core->num, input+2));
+		} else if (input[1] == 'f') {
+			RAnalFunction *fcn = r_anal_get_fcn_in (core->anal, core->offset, -1);
+			if (fcn) cmd_aea (core, 1, fcn->addr, fcn->size);
+		} else {
+			cmd_aea (core, 1, core->offset, (int)r_num_math (core->num, input+2));
+		}
+		break;
+	case 'a': // "aea"
+		if (input[1] == '?') {
+			aea_help (core);
+		} else if (input[1] == 'r') {
+			cmd_aea (core, 1<<1, core->offset, r_num_math (core->num, input+2));
+		} else if (input[1] == 'w') {
+			cmd_aea (core, 1<<2, core->offset, r_num_math (core->num, input+2));
+		} else if (input[1] == 'n') {
+			cmd_aea (core, 1<<3, core->offset, r_num_math (core->num, input+2));
+		} else if (input[1] == 'f') {
+			RAnalFunction *fcn = r_anal_get_fcn_in (core->anal, core->offset, -1);
+			if (fcn) cmd_aea (core, 1, fcn->addr, fcn->size);
+		} else {
+			cmd_aea (core, 0, core->offset, r_num_math (core->num, input+2));
+		}
+		break;
 	case '?':
 		if (input[1] == '?') {
 			const char *help_msg[] = {
@@ -2007,6 +2241,7 @@ static void cmd_anal_esil(RCore *core, const char *input) {
 			"aeim", "", "initialize ESIL VM stack (aeim- remove)",
 			"aeip", "", "initialize ESIL program counter to curseek",
 			"ae", " [expr]", "evaluate ESIL expression",
+			"ae[aA]", "[f] [count]", "analyse esil accesses (regs, mem..)",
 			"aep", " [addr]", "change esil PC to this address",
 			"aef", " [addr]", "emulate function",
 			"aek", " [query]", "perform sdb query on ESIL.info",
@@ -2401,7 +2636,6 @@ static bool cmd_anal_refs(RCore *core, const char *input) {
 					r_parse_filter (core->parser, core->flags,
 							asmop.buf_asm, str, sizeof (str));
 					fcn = r_anal_get_fcn_in (core->anal, ref->addr, 0);
-					if (!fcn) continue;
 					if (has_color) {
 						buf_asm = r_print_colorize_opcode (str, core->cons->pal.reg,
 										core->cons->pal.num);
@@ -2410,11 +2644,14 @@ static bool cmd_anal_refs(RCore *core, const char *input) {
 					}
 					comment = r_meta_get_string (core->anal, R_META_TYPE_COMMENT, ref->addr);
 					if (comment) {
-						buf_fcn = r_str_newf ("%s; %s", fcn->name, strtok (comment, "\n"));
+						buf_fcn = r_str_newf ("%s; %s", fcn ?
+								     fcn->name : "unknown function",
+								     strtok (comment, "\n"));
 					} else {
-						buf_fcn = r_str_newf ("%s", fcn->name);
+						buf_fcn = r_str_newf ("%s", fcn ? fcn->name : "unknown function");
 					}
-					r_cons_printf ("%c 0x%" PFMT64x " %s in %s\n", ref->type, ref->addr, buf_asm, buf_fcn);
+					r_cons_printf ("%c 0x%" PFMT64x " %s in %s\n",
+							ref->type, ref->addr, buf_asm, buf_fcn);
 					free (buf_asm);
 					free (buf_fcn);
 				}
@@ -2540,7 +2777,7 @@ static void cmd_anal_hint(RCore *core, const char *input) {
 		"ahb", " 16 @ $$", "force 16bit for current instruction",
 		"ahc", " 0x804804", "override call/jump address",
 		"ahf", " 0x804840", "override fallback address for call",
-		"ahi", " 10", "define numeric base for immediates (1,8,10,16)",
+		"ahi", " 10", "define numeric base for immediates (1, 8, 10, 16, s)",
 		"ahs", " 4", "set opcode size=4",
 		"ahS", " jz", "set asm.syntax=jz for this opcode",
 		"aho", " foo a0,33", "replace opcode string",
@@ -2577,9 +2814,29 @@ static void cmd_anal_hint(RCore *core, const char *input) {
 			free (ptr);
 		} else eprintf ("Missing argument\n");
 		break;
-	case 'i':
-		r_anal_hint_set_immbase (core->anal, core->offset,
-					(int)r_num_math (core->num, input + 1));
+	case 'i': // "ahi"
+		if (input[1] == '?') {
+			const char* help_msg[] = {
+				"Usage", "ahi [sbodh] [@ offset]", " Define numeric base",
+				"ahi", " [base]", "set numeric base (1, 2, 8, 10, 16)",
+				"ahi", " b", "set base to binary (1)",
+				"ahi", " d", "set base to decimal (10)",
+				"ahi", " h", "set base to hexadecimal (16)",
+				"ahi", " o", "set base to octal (8)",
+				"ahi", " s", "set base to string (2)",
+				NULL };
+			r_core_cmd_help (core, help_msg);
+		} else {
+		// You can either specify immbase with letters, or numbers
+			const int base =
+				(input[2] == 'b') ? 1 :
+				(input[2] == 's') ? 2 :
+				(input[2] == 'o') ? 8 :
+				(input[2] == 'd') ? 10 :
+				(input[2] == 'h') ? 16 :
+				(int) r_num_math (core->num, input + 1);
+			r_anal_hint_set_immbase (core->anal, core->offset, base);
+		}
 		break;
 	case 'c':
 		r_anal_hint_set_jump (core->anal, core->offset,

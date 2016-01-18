@@ -1391,6 +1391,7 @@ R_API void r_core_visual_mounts (RCore *core) {
 	}
 }
 
+#if 0
 static void var_index_show(RAnal *anal, RAnalFunction *fcn, ut64 addr, int idx) {
 	int i = 0;
 	RAnalVar *v;
@@ -1437,6 +1438,7 @@ eprintf ("TODO: support for arrays\n");
 		}
 	}
 }
+#endif
 
 // helper
 static void function_rename(RCore *core, ut64 addr, const char *name) {
@@ -1560,7 +1562,7 @@ static void r_core_visual_anal_refresh_column (RCore *core) {
 }
 
 static ut64 r_core_visual_anal_refresh (RCore *core) {
-	RAnalFunction *fcn;
+	//RAnalFunction *fcn;
 	ut64 addr;
 	char old[1024];
 	int cols = r_cons_get_size (NULL);
@@ -1568,7 +1570,7 @@ static ut64 r_core_visual_anal_refresh (RCore *core) {
 	if (!core) return 0LL;
 	old[0]='\0';
 	addr = core->offset;
-	fcn = r_anal_get_fcn_in (core->anal, addr, R_ANAL_FCN_TYPE_NULL);
+	//fcn = r_anal_get_fcn_in (core->anal, addr, R_ANAL_FCN_TYPE_NULL);
 
 	cols -= 50;
 	if (cols > 60) cols = 60;
@@ -1847,7 +1849,7 @@ R_API void r_core_visual_define (RCore *core) {
 		," e    end of function"
 		," f    analyze function"
 		," F    format"
-		," i    immediate base (1, 2, 8, 10, 16)"
+		," i    immediate base (b(in), o(ct), d(ec), h(ex), s(tr)"
 		," j    merge down (join this and next functions)"
 		," k    merge up (join this and previous function)"
 		," h    highlight word"

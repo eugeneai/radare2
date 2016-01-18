@@ -530,7 +530,7 @@ SETL/SETNGE
 						const char *dst = cs_reg_name(handle, INSOP(0).mem.base);
 						const char *counter = (a->bits==16)?"cx":
 							(a->bits==32)?"ecx":"rcx";
-						esilprintf (op, "%s,!,?{,BREAK,},%s,DUP,%s,DUP,"\
+						esilprintf (op, "%s,!,?{,BREAK,},%s,NUM,%s,NUM,"\
 								"%s,[%d],%s,=[%d],df,?{,%d,%s,-=,%d,%s,-=,},"\
 								"df,!,?{,%d,%s,+=,%d,%s,+=,},%s,--=,%s," \
 								"?{,8,GOTO,},%s,=,%s,=",
@@ -1633,33 +1633,27 @@ static int set_reg_profile(RAnal *anal) {
 		 "gpr	rax	.64	80	0\n"
 		 "gpr	eax	.32	80	0\n"
 		 "gpr	ax	.16	80	0\n"
-		 "gpr	ah	.8	81	0\n"
 		 "gpr	al	.8	80	0\n"
 		 "gpr	rbx	.64	40	0\n"
 		 "gpr	ebx	.32	40	0\n"
 		 "gpr	bx	.16	40	0\n"
-		 "gpr	bh	.8	41	0\n"
 		 "gpr	bl	.8	40	0\n"
 		 "gpr	rcx	.64	88	0\n"
 		 "gpr	ecx	.32	88	0\n"
 		 "gpr	cx	.16	88	0\n"
-		 "gpr	ch	.8	89	0\n"
 		 "gpr	cl	.8	88	0\n"
 		 "gpr	rdx	.64	96	0\n"
 		 "gpr	edx	.32	96	0\n"
 		 "gpr	dx	.16	96	0\n"
-		 "gpr	dh	.8	97	0\n"
 		 "gpr	dl	.8	96	0\n"
 		 "gpr	rsi	.64	104	0\n"
 		 "gpr	esi	.32	104	0\n"
 		 "gpr	si	.16	104	0\n"
 		 "gpr	sil	.8	104	0\n"
-		 "gpr	sih	.8	105	0\n"
 		 "gpr	rdi	.64	112	0\n"
 		 "gpr	edi	.32	112	0\n"
 		 "gpr	di	.16	112	0\n"
 		 "gpr	dil	.8	112	0\n"
-		 "gpr	dih	.8	113	0\n"
 		 "gpr	r8	.64	72	0\n"
 		 "gpr	r8d	.32	72	0\n"
 		 "gpr	r8w	.16	72	0\n"
@@ -1696,6 +1690,7 @@ static int set_reg_profile(RAnal *anal) {
 		 "gpr	rbp	.64	32	0\n"
 		 "gpr	ebp	.32	32	0\n"
 		 "gpr	bp	.16	32	0\n"
+		 "gpr	bpl	.8	32	0\n"
 		 "seg	cs	.64	136	0\n"
 		 "gpr	rflags	.64	144	0	c1p.a.zstido.n.rv\n"
 		 "gpr	eflags	.32	144	0	c1p.a.zstido.n.rv\n"
@@ -1712,6 +1707,9 @@ static int set_reg_profile(RAnal *anal) {
 		 "gpr	of	.1	.1163	0	overflow\n"
 
 		 "gpr	rsp	.64	152	0\n"
+		 "gpr	esp	.32	152	0\n"
+		 "gpr	sp	.16	152	0\n"
+		 "gpr	spl	.8	152	0\n"
 		 "seg	ss	.64	160	0\n"
 		 "seg	fs_base	.64	168	0\n"
 		 "seg	gs_base	.64	176	0\n"
@@ -1856,6 +1854,18 @@ static int set_reg_profile(RAnal *anal) {
 	return r_reg_set_profile_string (anal->reg, p);
 }
 
+static int archinfo(RAnal *anal, int q) {
+	switch (q) {
+	case R_ANAL_ARCHINFO_ALIGN:
+		return 0;
+	case R_ANAL_ARCHINFO_MAX_OP_SIZE:
+		return 16;
+	case R_ANAL_ARCHINFO_MIN_OP_SIZE:
+		return 1;
+	}
+	return 0;
+}
+
 RAnalPlugin r_anal_plugin_x86_cs = {
 	.name = "x86",
 	.desc = "Capstone X86 analysis",
@@ -1864,6 +1874,7 @@ RAnalPlugin r_anal_plugin_x86_cs = {
 	.arch = "x86",
 	.bits = 16|32|64,
 	.op = &analop,
+	.archinfo = archinfo,
 	.set_reg_profile = &set_reg_profile,
 	.esil_init = esil_x86_cs_init,
 	.esil_fini = esil_x86_cs_fini,
